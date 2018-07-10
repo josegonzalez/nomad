@@ -82,7 +82,7 @@ func TestBinPackIterator_NoExistingAlloc(t *testing.T) {
 			},
 		},
 	}
-	binp := NewBinPackIterator(ctx, static, false, 0)
+	binp := NewBinPackIterator(ctx, static, false, 0, 0.25)
 	binp.SetTaskGroup(taskGroup)
 
 	out := collectRanked(binp)
@@ -93,11 +93,11 @@ func TestBinPackIterator_NoExistingAlloc(t *testing.T) {
 		t.Fatalf("Bad: %v", out)
 	}
 
-	if out[0].Score != 18 {
-		t.Fatalf("Bad: %v", out[0])
+	if out[0].Score != 0.25 {
+		t.Fatalf("Bad Score: %v", out[0].Score)
 	}
-	if out[1].Score < 10 || out[1].Score > 16 {
-		t.Fatalf("Bad: %v", out[1])
+	if out[1].Score < 0.01 || out[1].Score > 0.25 {
+		t.Fatalf("Bad Score: %v", out[1].Score)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestBinPackIterator_PlannedAlloc(t *testing.T) {
 		},
 	}
 
-	binp := NewBinPackIterator(ctx, static, false, 0)
+	binp := NewBinPackIterator(ctx, static, false, 0, 0.25)
 	binp.SetTaskGroup(taskGroup)
 
 	out := collectRanked(binp)
@@ -169,11 +169,11 @@ func TestBinPackIterator_PlannedAlloc(t *testing.T) {
 		t.Fatalf("Bad: %#v", out)
 	}
 	if out[0] != nodes[1] {
-		t.Fatalf("Bad: %v", out)
+		t.Fatalf("Bad Score: %v", out)
 	}
 
-	if out[0].Score != 18 {
-		t.Fatalf("Bad: %v", out[0])
+	if out[0].Score != 0.25 {
+		t.Fatalf("Bad Score: %v", out[0].Score)
 	}
 }
 
@@ -251,7 +251,7 @@ func TestBinPackIterator_ExistingAlloc(t *testing.T) {
 			},
 		},
 	}
-	binp := NewBinPackIterator(ctx, static, false, 0)
+	binp := NewBinPackIterator(ctx, static, false, 0, 0.25)
 	binp.SetTaskGroup(taskGroup)
 
 	out := collectRanked(binp)
@@ -261,8 +261,8 @@ func TestBinPackIterator_ExistingAlloc(t *testing.T) {
 	if out[0] != nodes[1] {
 		t.Fatalf("Bad: %v", out)
 	}
-	if out[0].Score != 18 {
-		t.Fatalf("Bad: %v", out[0])
+	if out[0].Score != 0.25 {
+		t.Fatalf("Bad Score: %v", out[0].Score)
 	}
 }
 
@@ -345,7 +345,7 @@ func TestBinPackIterator_ExistingAlloc_PlannedEvict(t *testing.T) {
 		},
 	}
 
-	binp := NewBinPackIterator(ctx, static, false, 0)
+	binp := NewBinPackIterator(ctx, static, false, 0, 0.25)
 	binp.SetTaskGroup(taskGroup)
 
 	out := collectRanked(binp)
@@ -355,11 +355,11 @@ func TestBinPackIterator_ExistingAlloc_PlannedEvict(t *testing.T) {
 	if out[0] != nodes[0] || out[1] != nodes[1] {
 		t.Fatalf("Bad: %v", out)
 	}
-	if out[0].Score < 10 || out[0].Score > 16 {
-		t.Fatalf("Bad: %v", out[0])
+	if out[0].Score < 0.01 || out[0].Score > 0.25 {
+		t.Fatalf("Bad Score: %v", out[0].Score)
 	}
-	if out[1].Score != 18 {
-		t.Fatalf("Bad: %v", out[1])
+	if out[1].Score != 0.25 {
+		t.Fatalf("Bad Score: %v", out[1].Score)
 	}
 }
 
@@ -379,16 +379,23 @@ func TestJobAntiAffinity_PlannedAlloc(t *testing.T) {
 	}
 	static := NewStaticRankIterator(ctx, nodes)
 
+	job := mock.Job()
+	job.ID = "foo"
+	tg := job.TaskGroups[0]
+	tg.Count = 4
+
 	// Add a planned alloc to node1 that fills it
 	plan := ctx.Plan()
 	plan.NodeAllocation[nodes[0].Node.ID] = []*structs.Allocation{
 		{
-			ID:    uuid.Generate(),
-			JobID: "foo",
+			ID:        uuid.Generate(),
+			JobID:     "foo",
+			TaskGroup: tg.Name,
 		},
 		{
-			ID:    uuid.Generate(),
-			JobID: "foo",
+			ID:        uuid.Generate(),
+			JobID:     "foo",
+			TaskGroup: tg.Name,
 		},
 	}
 
@@ -399,24 +406,27 @@ func TestJobAntiAffinity_PlannedAlloc(t *testing.T) {
 		},
 	}
 
-	binp := NewJobAntiAffinityIterator(ctx, static, 5.0, "foo")
+	jobAntiAff := NewJobAntiAffinityIterator(ctx, static, 1.0, "foo")
+	jobAntiAff.SetJob(job)
+	jobAntiAff.SetTaskGroup(tg)
 
-	out := collectRanked(binp)
+	out := collectRanked(jobAntiAff)
 	if len(out) != 2 {
 		t.Fatalf("Bad: %#v", out)
 	}
 	if out[0] != nodes[0] {
 		t.Fatalf("Bad: %v", out)
 	}
-	if out[0].Score != -10.0 {
-		t.Fatalf("Bad: %#v", out[0])
+	// Score should be -(#collissions/desired_count) => -(2/4)
+	if out[0].Score != -0.5 {
+		t.Fatalf("Bad Score: %#v", out[0].Score)
 	}
 
 	if out[1] != nodes[1] {
 		t.Fatalf("Bad: %v", out)
 	}
 	if out[1].Score != 0.0 {
-		t.Fatalf("Bad: %v", out[1])
+		t.Fatalf("Bad Score: %v", out[1].Score)
 	}
 }
 
@@ -450,7 +460,7 @@ func TestNodeAntiAffinity_PenaltyNodes(t *testing.T) {
 	}
 	static := NewStaticRankIterator(ctx, nodes)
 
-	nodeAntiAffIter := NewNodeReschedulingPenaltyIterator(ctx, static, 50.0)
+	nodeAntiAffIter := NewNodeReschedulingPenaltyIterator(ctx, static, 0.25)
 	nodeAntiAffIter.SetPenaltyNodes(map[string]struct{}{node1.ID: {}})
 
 	out := collectRanked(nodeAntiAffIter)
@@ -458,7 +468,7 @@ func TestNodeAntiAffinity_PenaltyNodes(t *testing.T) {
 	require := require.New(t)
 	require.Equal(2, len(out))
 	require.Equal(node1.ID, out[0].Node.ID)
-	require.Equal(-50.0, out[0].Score)
+	require.Equal(-0.25, out[0].Score)
 
 	require.Equal(node2.ID, out[1].Node.ID)
 	require.Equal(0.0, out[1].Score)
